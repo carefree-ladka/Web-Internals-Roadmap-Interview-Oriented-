@@ -247,6 +247,9 @@
 - CDN transformations
 
 ### Core Web Vitals
+https://web.dev/articles/vitals
+
+<img width="834" height="229" alt="image" src="https://github.com/user-attachments/assets/fc680d81-0487-44c9-a611-fde849269507" />
 
 **LCP (Largest Contentful Paint)**
 - Target: <2.5s
