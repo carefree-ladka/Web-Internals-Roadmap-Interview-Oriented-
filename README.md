@@ -872,4 +872,1083 @@
 
 ---
 
+# 🌐 Web Internals: 50 Essential Interview Questions
+
+*Complete answers for browser architecture, rendering, JavaScript engines, and security*
+
+---
+
+## 1. Browser Architecture & Networking (15 Questions)
+
+### Q1: What happens when you type a URL and press Enter?
+
+**Complete Flow:**
+
+1. **DNS Lookup** - Domain name resolved to IP address
+2. **TCP Handshake** - 3-way handshake (SYN, SYN-ACK, ACK)
+3. **TLS Handshake** - Establish encrypted connection
+4. **HTTP Request** - Browser sends GET request
+5. **Server Response** - HTML document returned
+6. **HTML Parsing** - Browser tokenizes and builds DOM tree
+7. **Resource Discovery** - CSS, JS, images identified and requested
+8. **CSSOM Construction** - CSS parsed into CSSOM tree
+9. **Render Tree** - DOM + CSSOM combined (excluding non-visual elements)
+10. **Layout** - Calculate positions and dimensions
+11. **Paint** - Rasterize visual elements into layers
+12. **Composite** - Combine layers using GPU
+13. **Display** - Pixels rendered to screen
+
+---
+
+### Q2: What is DNS, and why is it slow?
+
+**DNS (Domain Name System)** resolves human-readable domain names to IP addresses.
+
+**Why it's slow:**
+- Requires multiple round trips across DNS hierarchy (root → TLD → authoritative)
+- Recursive lookups involve multiple server queries
+- Network latency for each hop
+- No cached result on first visit
+
+**Solutions:**
+- DNS prefetch: `<link rel="dns-prefetch" href="//example.com">`
+- DNS caching at browser/OS/router level
+- CDNs with globally distributed DNS servers
+- DNS over HTTPS (DoH) for security
+
+---
+
+### Q3: Difference between HTTP/1.1, HTTP/2, and HTTP/3?
+
+| Feature | HTTP/1.1 | HTTP/2 | HTTP/3 |
+|---------|----------|---------|---------|
+| **Protocol** | Text-based | Binary framing | Binary over QUIC |
+| **Connection** | One request per connection | Multiplexed streams | Multiplexed over UDP |
+| **HOL Blocking** | Yes (TCP level) | Partially (TCP level remains) | No (QUIC solves it) |
+| **Header Compression** | No | Yes (HPACK) | Yes (QPACK) |
+| **Server Push** | No | Yes | Yes |
+| **Handshake** | TCP + TLS (2-3 RTT) | TCP + TLS (2-3 RTT) | Combined QUIC (1 RTT) |
+| **Loss Recovery** | TCP retransmits all | TCP retransmits all | QUIC retransmits only lost streams |
+
+**Key Takeaway:**
+- HTTP/1.1: Sequential, slow, head-of-line blocking
+- HTTP/2: Multiplexing over single TCP connection (but TCP HOL remains)
+- HTTP/3: Uses QUIC over UDP, eliminates all HOL blocking
+
+---
+
+### Q4: What causes head-of-line (HOL) blocking?
+
+**Definition:** When one blocked request/packet prevents others from being processed.
+
+**HTTP/1.1 Request-Level HOL:**
+- Only one request per TCP connection
+- Subsequent requests must wait for previous to complete
+- Solution: HTTP/2 multiplexing
+
+**TCP Packet-Level HOL (affects HTTP/2):**
+- TCP guarantees ordered delivery
+- If one packet is lost, all subsequent packets wait (even from different streams)
+- Solution: HTTP/3 with QUIC (UDP-based, independent streams)
+
+**Example:**
+```
+TCP: [Packet 1 LOST] [Packet 2] [Packet 3]
+     All packets 2 & 3 blocked waiting for retransmit of Packet 1
+
+QUIC: [Stream A - Packet 1 LOST] [Stream B - Packet 1 ✓]
+      Stream B proceeds independently while Stream A retransmits
+```
+
+---
+
+### Q5: What is TLS handshake?
+
+**Purpose:** Establish encrypted connection and negotiate cipher suites.
+
+**TLS 1.2 Handshake (2 RTT):**
+1. **ClientHello** - Client sends supported ciphers, TLS version
+2. **ServerHello** - Server chooses cipher, sends certificate
+3. **Certificate Validation** - Client verifies certificate chain
+4. **Key Exchange** - Diffie-Hellman or RSA key exchange
+5. **Finished** - Both sides confirm encryption is working
+6. **Encrypted Communication** begins
+
+**TLS 1.3 Improvements (1 RTT):**
+- Combined key exchange with ClientHello
+- Removed weak ciphers
+- 0-RTT resumption for repeat connections
+
+---
+
+### Q6: Why is TCP slow on first request?
+
+**Multiple Round Trips Required:**
+
+1. **DNS Lookup** - 1 RTT (if not cached)
+2. **TCP Handshake** - 1 RTT (SYN, SYN-ACK, ACK)
+3. **TLS Handshake** - 1-2 RTT (certificate exchange, key negotiation)
+
+**Total:** 3-4 RTT before first byte of data
+
+**Cold Start Penalty:**
+- High latency multiplied by RTT count
+- 200ms latency × 4 RTT = 800ms before data transfer begins
+
+**Optimizations:**
+- Connection reuse (keep-alive)
+- TLS session resumption
+- TCP Fast Open
+- QUIC's combined handshake (HTTP/3)
+
+---
+
+### Q7: What is preconnect and when is it used?
+
+**Definition:** `<link rel="preconnect">` instructs browser to establish early connection to a domain.
+
+**What it does:**
+- DNS resolution
+- TCP handshake
+- TLS negotiation
+
+**When to use:**
+- Critical third-party resources (fonts, APIs)
+- Resources loaded later in page lifecycle
+- Known future navigations
+
+**Example:**
+```html
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://api.example.com">
+```
+
+**Trade-off:** Uses bandwidth and connection slots, so limit to ~3 critical domains.
+
+---
+
+### Q8: Difference between preload and prefetch?
+
+| Feature | Preload | Prefetch |
+|---------|---------|----------|
+| **Priority** | High | Low |
+| **Timing** | Current page | Future navigation |
+| **Cache** | Yes | Yes |
+| **Use Case** | Critical resources below-the-fold | Next page resources |
+| **Attribute** | `<link rel="preload">` | `<link rel="prefetch">` |
+
+**Preload Example:**
+```html
+<!-- Font needed but discovered late -->
+<link rel="preload" href="font.woff2" as="font" crossorigin>
+
+<!-- Critical hero image -->
+<link rel="preload" href="hero.jpg" as="image">
+```
+
+**Prefetch Example:**
+```html
+<!-- Next page JavaScript -->
+<link rel="prefetch" href="/page2-bundle.js">
+
+<!-- Likely user navigation -->
+<link rel="prefetch" href="/products.html">
+```
+
+---
+
+### Q9: Why is CSS render-blocking?
+
+**Core Reason:** Browser cannot render page until CSSOM (CSS Object Model) is built.
+
+**Why CSSOM is required:**
+- Layout calculations need final computed styles
+- Browser must know which styles apply to which elements
+- Cannot paint without knowing colors, sizes, positions
+
+**Render Tree Formula:**
+```
+DOM + CSSOM = Render Tree
+```
+
+**Optimization Strategies:**
+1. **Critical CSS** - Inline above-the-fold styles
+2. **Media Queries** - Non-blocking for print, mobile
+   ```html
+   <link rel="stylesheet" href="print.css" media="print">
+   ```
+3. **Async CSS Loading** - Use JavaScript to load non-critical CSS
+4. **Reduce CSS Size** - Remove unused styles, minify
+
+---
+
+### Q10: What is CORS?
+
+**CORS (Cross-Origin Resource Sharing)** - Browser security mechanism that controls cross-origin HTTP requests.
+
+**Same-Origin Policy:**
+- Protocol + Domain + Port must match
+- Prevents malicious sites from reading sensitive data
+
+**CORS Headers:**
+```http
+# Server Response
+Access-Control-Allow-Origin: https://trusted-site.com
+Access-Control-Allow-Methods: GET, POST, PUT
+Access-Control-Allow-Headers: Content-Type, Authorization
+Access-Control-Allow-Credentials: true
+```
+
+**Simple Request (no preflight):**
+- Methods: GET, HEAD, POST
+- Headers: Accept, Accept-Language, Content-Language, Content-Type (limited)
+
+**Complex Request (requires preflight):**
+- Custom headers
+- Methods: PUT, DELETE, PATCH
+- Content-Type: application/json
+
+---
+
+### Q11: What triggers a CORS preflight?
+
+**Preflight** = OPTIONS request sent before actual request to check permissions.
+
+**Triggers:**
+
+1. **HTTP Methods:** PUT, DELETE, PATCH, CONNECT, OPTIONS, TRACE
+2. **Custom Headers:** Any header not in CORS-safelisted set
+3. **Content-Type:** `application/json`, `text/xml`, anything except:
+   - `application/x-www-form-urlencoded`
+   - `multipart/form-data`
+   - `text/plain`
+4. **Credentials:** `credentials: 'include'` with custom headers
+
+**Preflight Flow:**
+```http
+# Browser sends OPTIONS
+OPTIONS /api/data HTTP/1.1
+Origin: https://example.com
+Access-Control-Request-Method: PUT
+Access-Control-Request-Headers: Content-Type, X-Custom-Header
+
+# Server responds
+HTTP/1.1 204 No Content
+Access-Control-Allow-Origin: https://example.com
+Access-Control-Allow-Methods: PUT
+Access-Control-Allow-Headers: Content-Type, X-Custom-Header
+Access-Control-Max-Age: 86400
+
+# Then actual request proceeds
+```
+
+---
+
+### Q12: How does browser cache decide HIT vs MISS?
+
+**Cache Decision Flow:**
+
+1. **Check Cache-Control header**
+   ```http
+   Cache-Control: max-age=3600          # Cache for 1 hour
+   Cache-Control: no-cache              # Revalidate every time
+   Cache-Control: no-store              # Never cache
+   Cache-Control: public, max-age=31536000  # Cache 1 year (immutable)
+   ```
+
+2. **Calculate Freshness**
+   - If `max-age` not exceeded → **CACHE HIT**
+   - If expired → check `ETag` or `Last-Modified`
+
+3. **Revalidation (if expired)**
+   ```http
+   # Browser sends
+   If-None-Match: "33a64df551425fcc55e4d42a148795d9"
+   
+   # Server responds
+   304 Not Modified  → CACHE HIT (use stale version)
+   200 OK           → CACHE MISS (download new version)
+   ```
+
+**Cache Hierarchy:**
+1. Memory cache (fastest, cleared on tab close)
+2. Disk cache (persistent)
+3. Service Worker cache (programmable)
+
+---
+
+### Q13: What is a service worker?
+
+**Service Worker** = Programmable network proxy that runs in background thread.
+
+**Capabilities:**
+- Intercept and modify network requests
+- Cache resources for offline access
+- Background sync
+- Push notifications
+- Periodic background sync
+
+**Lifecycle:**
+```javascript
+// 1. Registration
+navigator.serviceWorker.register('/sw.js');
+
+// 2. Installation
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open('v1').then(cache => cache.addAll(['/']))
+  );
+});
+
+// 3. Activation
+self.addEventListener('activate', (event) => {
+  // Clean up old caches
+});
+
+// 4. Fetch interception
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request)
+      .then(response => response || fetch(event.request))
+  );
+});
+```
+
+---
+
+### Q14: Why must service workers run on HTTPS?
+
+**Security Reasons:**
+
+1. **Powerful Capabilities**
+   - Can intercept ALL network requests
+   - Can modify responses
+   - Can inject content
+
+2. **MITM Attack Prevention**
+   - Without HTTPS, attacker could inject malicious service worker
+   - Would persist and control all future requests
+
+3. **Trust Boundary**
+   - HTTPS ensures service worker code integrity
+   - Certificate validation proves origin authenticity
+
+**Exception:** `localhost` allowed for development.
+
+---
+
+### Q15: Explain SameSite cookies.
+
+**SameSite** attribute controls when cookies are sent in cross-site requests.
+
+**Values:**
+
+1. **Strict** - Never sent in cross-site requests
+   ```http
+   Set-Cookie: session=abc123; SameSite=Strict
+   ```
+   - Clicking link from email → cookie NOT sent
+   - Direct navigation only
+
+2. **Lax** (default) - Sent only on "safe" cross-site requests
+   - Top-level navigation (GET) → cookie sent
+   - Iframe, AJAX, POST → cookie NOT sent
+
+3. **None** - Always sent (requires Secure)
+   ```http
+   Set-Cookie: tracking=xyz; SameSite=None; Secure
+   ```
+   - Third-party cookies (ads, analytics)
+   - Must use HTTPS
+
+**CSRF Protection:**
+```http
+# Login cookie should be Strict or Lax
+Set-Cookie: session=abc; SameSite=Strict; HttpOnly; Secure
+```
+
+---
+
+## 2. Rendering Pipeline & Performance (15 Questions)
+
+### Q16: What is Critical Rendering Path?
+
+**Definition:** Sequence of steps browser takes to convert HTML/CSS/JS into pixels.
+
+**Complete Pipeline:**
+
+```
+HTML → DOM Tree
+CSS → CSSOM Tree
+       ↓
+   Render Tree (DOM + CSSOM, excludes display:none)
+       ↓
+   Layout (calculate geometry)
+       ↓
+   Paint (rasterize to layers)
+       ↓
+   Composite (combine layers on GPU)
+       ↓
+   Display
+```
+
+**Optimization Goals:**
+- Minimize critical resources (CSS, fonts, blocking JS)
+- Minimize critical bytes (file sizes)
+- Minimize critical path length (RTT count)
+
+---
+
+### Q17: What is a reflow (layout) vs repaint?
+
+**Reflow (Layout):**
+- **Recalculates** positions and dimensions of elements
+- **Expensive** - affects entire render tree
+- **Triggered by:** width, height, margin, padding, position, display, float
+
+**Repaint:**
+- **Redraws** pixels without changing layout
+- **Less expensive** than reflow
+- **Triggered by:** color, background, visibility, outline, box-shadow
+
+**Composite-Only Change:**
+- **Cheapest** - no layout or paint needed
+- **Triggered by:** transform, opacity (on composited layer)
+
+**Performance Hierarchy:**
+```
+Composite-only (GPU)  ← Fastest
+    ↑
+Repaint (CPU)
+    ↑
+Reflow (CPU)          ← Slowest
+```
+
+**Example:**
+```javascript
+// ❌ BAD - Causes reflow
+element.style.width = '100px';
+element.style.height = '100px';
+
+// ✅ GOOD - Single reflow
+element.className = 'new-size';  // CSS: .new-size { width: 100px; height: 100px; }
+
+// ✅ BEST - Composite-only
+element.style.transform = 'scale(1.5)';
+```
+
+---
+
+### Q18: What triggers layout thrashing?
+
+**Layout Thrashing** = Forced synchronous layout caused by reading layout properties immediately after writing.
+
+**The Problem:**
+```javascript
+// ❌ BAD - Causes layout thrashing
+for (let i = 0; i < 100; i++) {
+  element.style.width = `${element.offsetWidth + 10}px`;  // Read → Write
+  // Forces layout recalculation on EVERY iteration
+}
+```
+
+**Why it happens:**
+1. Write operation (style.width) invalidates layout
+2. Read operation (offsetWidth) forces immediate recalculation
+3. Browser cannot batch optimizations
+
+**Solution - Batch reads, then writes:**
+```javascript
+// ✅ GOOD - Batch reads first
+const widths = [];
+for (let i = 0; i < 100; i++) {
+  widths.push(elements[i].offsetWidth);  // All reads first
+}
+
+// Then batch writes
+requestAnimationFrame(() => {
+  for (let i = 0; i < 100; i++) {
+    elements[i].style.width = `${widths[i] + 10}px`;  // All writes
+  }
+});
+```
+
+**Properties that force layout:**
+- offsetWidth/Height, clientWidth/Height, scrollWidth/Height
+- getComputedStyle(), getBoundingClientRect()
+
+---
+
+### Q19: Why are transformations (translate, scale, opacity) fast?
+
+**Key Reason:** Operate on **composited layers** handled by GPU, bypassing layout and paint.
+
+**Rendering Pipeline Comparison:**
+
+```
+// Position change (top/left)
+Layout → Paint → Composite  [Slow - all 3 stages]
+
+// Transform change
+Composite only             [Fast - GPU only]
+```
+
+**GPU Acceleration:**
+- Transforms create new layer
+- Layer compositing happens on GPU
+- No main thread blocking
+- Smooth 60fps animations possible
+
+**Will-Change Optimization:**
+```css
+.animated {
+  will-change: transform, opacity;
+  /* Promotes element to its own layer */
+}
+```
+
+**Example:**
+```css
+/* ❌ SLOW - triggers layout + paint */
+@keyframes slideIn {
+  from { left: -100px; }
+  to { left: 0; }
+}
+
+/* ✅ FAST - composite-only */
+@keyframes slideIn {
+  from { transform: translateX(-100px); }
+  to { transform: translateX(0); }
+}
+```
+
+---
+
+### Q20: How does the browser build layers?
+
+**Layer Promotion Criteria:**
+
+1. **Explicit Composition:**
+   - `will-change: transform, opacity`
+   - 3D transforms (`translateZ`, `perspective`)
+   - `<video>`, `<canvas>`, `<iframe>`
+   - Filters, masks, blend modes
+
+2. **Implicit Composition:**
+   - `position: fixed` or `position: sticky`
+   - Overflow scroll (`overflow: auto/scroll`)
+   - CSS animations/transitions on transform/opacity
+   - Elements above composited layers
+
+**Layer Architecture:**
+```
+Main Thread:
+  Layout → Paint → Generate display lists
+      ↓
+Compositor Thread (GPU):
+  Combine layers → Output to screen
+```
+
+**Trade-offs:**
+- **Benefit:** Smooth animations, reduced repaints
+- **Cost:** Memory overhead, texture uploads
+
+**Anti-pattern:**
+```css
+/* ❌ Creates TOO MANY layers */
+* {
+  will-change: transform;  /* Don't do this! */
+}
+```
+
+---
+
+### Q21: Why is large DOM bad for performance?
+
+**Performance Impacts:**
+
+1. **Layout Cost** - O(n) complexity for recalculations
+   - More nodes = longer layout time
+   - Nested structures compound the cost
+
+2. **Memory Usage**
+   - Each DOM node: ~1KB memory
+   - 10,000 nodes ≈ 10MB just for DOM
+
+3. **Rendering Cost**
+   - More paint operations
+   - Larger render trees
+   - More layers to composite
+
+4. **JavaScript Performance**
+   - Slow querySelector/querySelectorAll
+   - Event delegation traversal cost
+   - Mutation observer overhead
+
+**Benchmarks:**
+```
+1,000 nodes   → 16ms layout (< 1 frame)
+10,000 nodes  → 150ms layout (9 dropped frames)
+50,000 nodes  → 750ms layout (45 dropped frames)
+```
+
+**Solutions:**
+- Virtual scrolling (render only visible items)
+- Pagination
+- Progressive rendering
+- CSS containment
+
+---
+
+### Q22: Explain event delegation.
+
+**Definition:** Attach single event listener to parent instead of multiple listeners on children.
+
+**How it works:**
+```javascript
+// ❌ BAD - 1000 event listeners
+document.querySelectorAll('.item').forEach(item => {
+  item.addEventListener('click', handleClick);
+});
+
+// ✅ GOOD - 1 event listener
+document.querySelector('.list').addEventListener('click', (e) => {
+  if (e.target.matches('.item')) {
+    handleClick(e);
+  }
+});
+```
+
+**Benefits:**
+1. **Fewer listeners** - Better memory usage
+2. **Dynamic elements** - Works for elements added later
+3. **Simpler cleanup** - No need to remove individual listeners
+
+**Event Bubbling:**
+```
+Click on <button>
+    ↓
+<button> handler (target phase)
+    ↓
+<div> handler (bubbling phase)
+    ↓
+<body> handler
+    ↓
+<html> handler
+```
+
+**When NOT to use:**
+- Events that don't bubble (focus, blur, load)
+- When you need exact target without matching
+
+---
+
+### Q23: How does browser scheduling work?
+
+**Event Loop Phases:**
+
+```
+1. Execute Macrotask (one task)
+     ↓
+2. Execute ALL Microtasks
+     ↓
+3. Render if needed (requestAnimationFrame → Layout → Paint)
+     ↓
+4. requestIdleCallback (if time remaining)
+     ↓
+Repeat
+```
+
+**Task Queues:**
+
+**Macrotask Queue:**
+- setTimeout, setInterval
+- setImmediate (Node.js)
+- I/O operations
+- UI rendering
+- postMessage
+
+**Microtask Queue:**
+- Promise.then/catch/finally
+- queueMicrotask()
+- MutationObserver
+- process.nextTick (Node.js)
+
+**Example Execution Order:**
+```javascript
+console.log('1. Sync');
+
+setTimeout(() => console.log('2. Macro'), 0);
+
+Promise.resolve().then(() => console.log('3. Micro'));
+
+console.log('4. Sync');
+
+// Output: 1 → 4 → 3 → 2
+```
+
+---
+
+### Q24: Difference between requestAnimationFrame and requestIdleCallback?
+
+| Feature | requestAnimationFrame | requestIdleCallback |
+|---------|----------------------|---------------------|
+| **Timing** | Before next paint | During idle time |
+| **Frequency** | ~60fps (16.67ms) | Variable, opportunistic |
+| **Priority** | High | Low |
+| **Use Case** | Animations, visual updates | Non-critical work |
+| **Guarantee** | Runs every frame | May not run if busy |
+
+**requestAnimationFrame:**
+```javascript
+function animate() {
+  // Smooth 60fps animation
+  element.style.transform = `translateX(${x}px)`;
+  x += 1;
+  requestAnimationFrame(animate);
+}
+```
+
+**requestIdleCallback:**
+```javascript
+requestIdleCallback((deadline) => {
+  // Work while idle
+  while (deadline.timeRemaining() > 0 && tasks.length) {
+    processTask(tasks.shift());
+  }
+}, { timeout: 1000 });  // Force execution after 1s
+```
+
+---
+
+### Q25: Why is long JavaScript execution harmful?
+
+**Single-Threaded Main Thread:**
+
+```
+Main Thread:
+  JS Execution (250ms) → [User clicks button... no response]
+                       → [Frame deadline missed × 15]
+  Finally finishes → Process queued events
+```
+
+**Problems:**
+
+1. **Blocks Rendering** - No frames painted during execution
+2. **Input Lag** - User interactions queued but not processed
+3. **Jank** - Dropped frames cause stuttering
+4. **Poor UX** - App feels frozen
+
+**Long Task:** Any task > 50ms
+
+**Solutions:**
+
+1. **Break up work:**
+```javascript
+// ❌ Blocks for 500ms
+for (let i = 0; i < 1000000; i++) {
+  processItem(i);
+}
+
+// ✅ Yield to browser
+async function processChunked() {
+  for (let i = 0; i < 1000000; i += 1000) {
+    for (let j = 0; j < 1000; j++) {
+      processItem(i + j);
+    }
+    await new Promise(resolve => setTimeout(resolve, 0));  // Yield
+  }
+}
+```
+
+2. **Use Web Workers** for heavy computation
+3. **Debounce/throttle** expensive operations
+
+---
+
+### Q26: How do Web Workers improve performance?
+
+**Web Workers** = Separate thread for JavaScript execution.
+
+**Benefits:**
+
+1. **Offload CPU-heavy tasks**
+   - Parsing large JSON
+   - Image processing
+   - Encryption/hashing
+   - Data analysis
+
+2. **Non-blocking**
+   - Main thread stays responsive
+   - Smooth UI during computation
+
+3. **Parallel processing**
+   - Utilize multi-core CPUs
+
+**Example:**
+```javascript
+// main.js
+const worker = new Worker('worker.js');
+
+worker.postMessage({ data: largeDataset });
+
+worker.onmessage = (e) => {
+  console.log('Result:', e.data);
+};
+
+// worker.js
+self.onmessage = (e) => {
+  const result = expensiveOperation(e.data);
+  self.postMessage(result);
+};
+```
+
+**Limitations:**
+- No DOM access
+- No window object
+- Communication via postMessage (structured clone)
+- Overhead for small tasks
+
+---
+
+### Q27: What is a compositing-only change?
+
+**Definition:** Style change that requires ONLY GPU compositing, skipping layout and paint.
+
+**Eligible Properties:**
+- `transform` (translate, scale, rotate)
+- `opacity`
+- `filter` (on composited layer)
+
+**Rendering Pipeline Comparison:**
+
+```
+Full Pipeline:
+JavaScript → Style → Layout → Paint → Composite
+                                         ↓
+                                     [GPU renders]
+
+Composite-Only:
+JavaScript → Style → Composite
+                         ↓
+                     [GPU renders]
+```
+
+**Why it's fast:**
+- CPU layout/paint skipped
+- GPU handles transformation
+- Independent of main thread
+- Consistent 60fps achievable
+
+**Requirements:**
+```css
+.element {
+  /* Promote to layer first */
+  will-change: transform;
+  
+  /* Then animate */
+  transform: translateX(100px);  /* Composite-only */
+}
+```
+
+**Verification in DevTools:**
+- Use "Rendering" tab → "Layer borders"
+- Green border = composited layer
+
+---
+
+### Q28: How does lazy loading images work?
+
+**Native Lazy Loading:**
+```html
+<img src="image.jpg" loading="lazy" alt="Description">
+```
+
+**Browser Behavior:**
+- Loads image when it enters viewport (+ margin)
+- Default margin: ~3000px
+- No JavaScript required
+
+**Intersection Observer (Custom):**
+```javascript
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const img = entry.target;
+      img.src = img.dataset.src;  // Load actual image
+      observer.unobserve(img);
+    }
+  });
+}, {
+  rootMargin: '50px'  // Load 50px before entering viewport
+});
+
+document.querySelectorAll('img[data-src]').forEach(img => {
+  observer.observe(img);
+});
+```
+
+**Benefits:**
+- Reduces initial page weight
+- Faster initial load
+- Saves bandwidth
+- Improves Core Web Vitals (LCP)
+
+---
+
+### Q29: What are Web Vitals?
+
+**Core Web Vitals** = User-centric performance metrics.
+
+**1. LCP (Largest Contentful Paint)**
+- **Measures:** Loading performance
+- **Target:** < 2.5 seconds
+- **What counts:** Largest visible element (image, video, text block)
+- **Optimize:** Reduce server response time, optimize images, eliminate render-blocking
+
+**2. INP (Interaction to Next Paint)**
+- **Measures:** Responsiveness
+- **Target:** < 200ms
+- **Replaces:** FID (First Input Delay)
+- **What counts:** Latency of ALL user interactions
+- **Optimize:** Break up long tasks, reduce JavaScript, use web workers
+
+**3. CLS (Cumulative Layout Shift)**
+- **Measures:** Visual stability
+- **Target:** < 0.1
+- **What counts:** Unexpected layout shifts during page lifetime
+- **Optimize:** Size attributes on images/videos, avoid dynamic content insertion, reserve space for ads
+
+**Calculation Example (CLS):**
+```
+Frame 1: Element shifts 25% of viewport = 0.25 impact
+Frame 2: Element shifts 10% of viewport = 0.10 impact
+CLS Score = 0.25 + 0.10 = 0.35 (Poor)
+```
+
+---
+
+### Q30: What causes layout shifts (CLS)?
+
+**Common Causes:**
+
+1. **Images without dimensions**
+```html
+<!-- ❌ BAD - causes shift when loaded -->
+<img src="photo.jpg" alt="Photo">
+
+<!-- ✅ GOOD - reserves space -->
+<img src="photo.jpg" width="800" height="600" alt="Photo">
+```
+
+2. **Web fonts (FOIT/FOUT)**
+```css
+/* ❌ Causes shift when font loads */
+body { font-family: 'CustomFont'; }
+
+/* ✅ Use font-display */
+@font-face {
+  font-family: 'CustomFont';
+  font-display: swap;  /* Show fallback immediately */
+}
+```
+
+3. **Dynamic content injection**
+```javascript
+// ❌ Pushes content down
+document.body.insertAdjacentHTML('afterbegin', bannerHTML);
+
+// ✅ Reserve space with min-height
+element.style.minHeight = '100px';
+```
+
+4. **Ads without reserved space**
+5. **Animations that change height/width**
+6. **Late-loading stylesheets**
+
+**Prevention:**
+- Always specify dimensions on media
+- Use `aspect-ratio` CSS property
+- Reserve space for dynamic content
+- Use `font-display: swap` or `font-display: optional`
+
+---
+
+## 3. JavaScript Engine Internals (10 Questions)
+
+### Q31: How does V8 compile JavaScript?
+
+**V8 Compilation Pipeline:**
+
+```
+1. Parser
+   ↓
+   Abstract Syntax Tree (AST)
+   ↓
+2. Ignition (Interpreter)
+   ↓
+   Bytecode (executed immediately)
+   ↓
+3. TurboFan (Optimizing Compiler)
+   ↓
+   Optimized Machine Code
+   ↓
+4. Deoptimization (if assumptions break)
+   ↓
+   Back to bytecode
+```
+
+**Stages in Detail:**
+
+1. **Eager Parsing:** Top-level code parsed immediately
+2. **Lazy Parsing:** Functions parsed only when called
+3. **Hot Code Detection:** Ignition monitors execution frequency
+4. **Speculative Optimization:** TurboFan makes assumptions (types, shapes)
+5. **Deoptimization:** Falls back if assumptions violated
+
+**Example:**
+```javascript
+function add(a, b) {
+  return a + b;
+}
+
+// First 100 calls: a and b are numbers
+// V8 optimizes for number addition
+
+add(1, 2);  // Optimized machine code path
+
+add("hello", "world");  // DEOPTIMIZATION! String addition
+```
+
+---
+
+### Q32: What are hidden classes?
+
+**Hidden Classes (Maps)** = Internal structures V8 uses to optimize property access.
+
+**Problem:** JavaScript objects are dynamic dictionaries (slow lookups).
+
+**Solution:** V8 creates hidden classes that track object structure.
+
+**Example:**
+```javascript
+function Point(x, y) {
+  this.x = x;  // Hidden class C0 → C1 (added 'x')
+  this.y = y;  // Hidden class C1 → C2 (added 'y')
+}
+
+const p1 = new Point(1, 2);
+const p2 = new Point(3, 4);
+// p1 and p2 share hidden class C2 → Fast property access
+```
+
+**Breaking Hidden Classes:**
+```javascript
+const p3 = new Point(5, 6);
+delete p3.x;  // ❌ Different hidden class, can't be optimized
+
+const p4 = new Point(7, 8);
+p4.z = 9;    // ❌ Different property
+```
+
 *Good luck with your interviews! Master the fundamentals, understand the tradeoffs, and always be ready to explain the "why" behind technical decisions.*
